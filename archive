@@ -81,7 +81,7 @@ def main():
                functools.partial(needs_put, bucket),
                functools.partial(put_manifest, bucket),
                functools.partial(latest_manifest, bucket, hostname, username),
-               functools.partial(Manifest.for_directories, hostname, username)
+               functools.partial(Manifest.build_manifest, hostname, username)
               )
 
     if args.command == 'restore':
