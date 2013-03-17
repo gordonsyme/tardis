@@ -7,11 +7,18 @@ class Tree(object):
             children = []
 
         self._value = value
-        self._children = children
+        self._children = list(children)
 
     @property
     def value(self):
         return self._value
+
+    @property
+    def children(self):
+        return list(self._children)
+
+    def fmap(self, f):
+        return self.__class__(f(self._value), [child.fmap(f) for child in self._children])
 
     def __iter__(self):
         """Pre-order iteration"""
@@ -20,13 +27,18 @@ class Tree(object):
 
         return chain([self._value], child_values)
 
-    def fmap(self, f):
-        return self.__class__(f(self._value), [child.fmap(f) for child in self._children])
+    def __eq__(self, other):
+        if isinstance(other, Tree):
+            return self.__dict__ == other.__dict__
+        return NotImplemented
 
-    def flatten(self):
-        return list(iter(self))
+    def __ne__(self, other):
+        return not self == other
+
+    def __repr__(self):
+        return "<Tree({t.value}, {t.children})>".format(t=self)
 
     @classmethod
     def build_tree(cls, value, children_for):
-        children = [cls.build_tree(child, children_for) for child in children_for(value)]
+        children = (cls.build_tree(child, children_for) for child in children_for(value))
         return cls(value, children)
