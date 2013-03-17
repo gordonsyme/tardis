@@ -33,7 +33,10 @@ class Tree(object):
         return NotImplemented
 
     def __ne__(self, other):
-        return not self == other
+        result = self.__eq__(other)
+        if result is NotImplemented:
+            return result
+        return not result
 
     def __repr__(self):
         return "<Tree({t.value}, {t.children})>".format(t=self)
