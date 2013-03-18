@@ -5,10 +5,32 @@ import pwd, grp, stat
 import logging
 import csv
 import functools
-from collections import defaultdict
+from collections import namedtuple
 
 from tardis.util import sha1sum, iso8601
 from tardis.tree import Tree
+
+
+class StatInfo(namedtuple('StatInfo', [ 'owner' , 'group' , 'mode' , 'ctime' , 'mtime' , 'size' ])):
+    __slots__ = () # avoid creating an instance __dict__
+
+    @classmethod
+    def for_file(cls, path):
+        if not path:
+            raise ValueError("Must specify a file path")
+
+        stat_struct = os.stat(path)
+
+        owner = pwd.getpwuid(stat_struct.st_uid).pw_name
+        group = grp.getgrgid(stat_struct.st_gid).gr_name
+        mode  = stat.S_IMODE(stat_struct.st_mode)
+
+        ctime = os.path.getctime(path)
+        mtime = os.path.getmtime(path)
+        size  = os.path.getsize(path)
+
+        return cls(owner, group, mode, int(ctime), int(mtime), size)
+
 
 
 class FileEntry(object):
@@ -21,26 +43,31 @@ class FileEntry(object):
 
     Note that the content may not exist in S3 yet.
     """
-    def __init__(self, file_path, object_id=None, *stat_info):
+    def __init__(self, file_path, object_id, stat_info=None):
         """Create a FileEntry.
 
         file_path - file name
         checksum - checksum of the file's content.
-        object_id - S3 object id for the content tarball. If ommitted a unique
-                    id is generated with the "data/" prefix.
+        object_id - S3 object id for the content tarball.
+        stat_info - a StatInfo instance for this file, will be calculated from the file if not specified.
         """
-        logging.debug("Creating manifest entry for {}".format(file_path))
+        logging.debug("Creating file entry for {}".format(file_path))
 
         if not file_path:
             raise ValueError("Must specify a file path")
+
+        if not object_id:
+            raise ValueError("Must specify an object id")
+
+        if not stat_info:
+            stat_info = StatInfo.for_file(file_path)
 
         self.path = file_path
         self.object_id = object_id
         self.stat_info = stat_info
 
     def __repr__(self):
-        return "<FileEntry({!r}, {!r}, {!r}, {!r}, {!r}, {!r}, {!r}, {!r})>".format(
-                        self.path, self.object_id, *self.stat_info)
+        return "<FileEntry({!r}, {!r}, {!r})>".format(self.path, self.object_id, self.stat_info)
 
     @property
     def checksum(self):
@@ -54,8 +81,8 @@ class FileEntry(object):
         logging.debug("Creating FileEntry from: {}".format(fields))
         return cls(*fields)
 
-    def as_fields(self, base_path=''):
-        return (os.path.join(base_path, self.path), self.object_id) + self.stat_info
+    def as_fields(self):
+        return (self.path, self.object_id) + self.stat_info
 
     def __eq__(self, other):
         if isinstance(other, FileEntry):
@@ -96,7 +123,7 @@ class DirectoryEntry(object):
 
     def __eq__(self, other):
         if isinstance(other, DirectoryEntry):
-            return self.entries == other.entries
+            return all([self.path == other.path, self.entries == other.entries])
         return NotImplemented
 
     def __ne__(self, other):
@@ -127,9 +154,9 @@ class DirectoryEntry(object):
 
         logging.debug("Creating manifest for {}".format(path))
 
-        paths = [os.path.join(path, e) for e in os.listdir(path)]
+        paths = [os.path.join(path, e) for e in sorted(os.listdir(path))]
 
-        entries = [FileEntry(os.path.basename(f), cls._object_id(f), *cls._stat_info(f))
+        entries = [FileEntry(f, cls._object_id(f), StatInfo.for_file(f))
                        for f in paths
                        if os.path.isfile(f)]
 
@@ -155,20 +182,6 @@ class DirectoryEntry(object):
 
         return checksum
 
-    @classmethod
-    def _stat_info(cls, path):
-        stat_struct = os.stat(path)
-
-        owner = pwd.getpwuid(stat_struct.st_uid).pw_name
-        group = grp.getgrgid(stat_struct.st_gid).gr_name
-        mode  = stat.S_IMODE(stat_struct.st_mode)
-
-        ctime = os.path.getctime(path)
-        mtime = os.path.getmtime(path)
-        size  = os.path.getsize(path)
-
-        return (owner, group, mode, int(ctime), int(mtime), size)
-
 
 
 class Manifest(object):
@@ -187,9 +200,9 @@ class Manifest(object):
 
     manifest/{hostname}/{user}/{timestamp}
     """
-    def __init__(self, name, manifests):
+    def __init__(self, name, manifest_tree):
         self._name = name
-        self._manifests = manifests
+        self._manifest_tree = manifest_tree
 
     @classmethod
     def build_manifest(cls, hostname, user, path, ignored_directories=None):
@@ -229,7 +242,7 @@ class Manifest(object):
     # read .tardis_manifest -> gets the manifest entries
     # create a manifest for each sub-directory (either by reading .tardis_manifest or creating from scratch)
     def write_cache(self):
-        for directory_entry in self._manifests:
+        for directory_entry in self._manifest_tree:
             directory_entry.write_cache
 
 
@@ -241,9 +254,9 @@ class Manifest(object):
     def to_csv(self, stream):
         # Write the name of *this* manifest, but not the sub-manifests
         # Each entry needs to know the path in order to properly write filenames
-        logging.debug("Writing {} to csv, entries: {}".format(self.__class__, self.entries))
+        logging.debug("Writing {} to csv, entries: {}".format(self.__class__, self._manifest_tree))
 
         writer = csv.writer(stream, delimiter=':', lineterminator='\n')
-        writer.writerow([self.name])
-        for directory_entry in self._manifests:
-            writer.writerows(entry.as_fields(self.path) for entry in directory_entry.entries)
+        writer.writerow([self._name])
+        for directory_entry in self._manifest_tree:
+            writer.writerows(entry.as_fields() for entry in directory_entry.entries)
