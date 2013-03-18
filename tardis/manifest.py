@@ -131,7 +131,7 @@ class DirectoryEntry(object):
         # I don't like this being here, feels impure and out-of-place
         with open(os.path.join(self.path, '.tardis_manifest'), 'w') as f:
             writer = csv.writer(f, delimiter=':', lineterminator='\n')
-            writer.writerows(entry.as_fields(self.path) for (f, entry) in self.entries.iteritems())
+            writer.writerows(entry.as_fields(self.path) for entry in self.entries)
 
     @classmethod
     def for_directory(cls, path, ignored_directories=None):

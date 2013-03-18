@@ -135,7 +135,7 @@ def test_directory_entry_for_directory_no_files(isfile_mock):
     isfile_mock.return_value = False
 
     expected = DirectoryEntry(temp_dir, [])
-    assert_equals(expected, DirectoryEntry.for_directory(temp_dir))
+    assert_really_equal(expected, DirectoryEntry.for_directory(temp_dir))
 
 
 @with_setup(setup_func, teardown_func)
