@@ -1,6 +1,8 @@
 import os.path
 import tempfile
 import shutil
+import functools
+import textwrap
 from contextlib import closing
 from cStringIO import StringIO
 
@@ -9,7 +11,7 @@ from mock import patch
 
 from utilities import assert_really_equal, assert_really_not_equal
 
-from tardis.util import sha1sum
+from tardis.util import sha1sum, makedirs
 from tardis.tree import Tree
 from tardis.manifest import StatInfo, FileEntry, DirectoryEntry, Manifest
 
@@ -162,30 +164,30 @@ def test_directory_entry_for_directory():
 ##################
 @raises(ValueError)
 @with_setup(setup_func, teardown_func)
-def test_manifest_build_manifest_no_hostname():
-    Manifest.build_manifest(None, 'username', temp_dir)
+def test_manifest_from_filesystem_no_hostname():
+    Manifest.from_filesystem(None, 'username', temp_dir)
 
 
 @raises(ValueError)
 @with_setup(setup_func, teardown_func)
-def test_manifest_build_manifest_no_username():
-    Manifest.build_manifest('hostname', None, temp_dir)
+def test_manifest_from_filesystem_no_username():
+    Manifest.from_filesystem('hostname', None, temp_dir)
 
 
 @raises(ValueError)
-def test_manifest_build_manifest_no_path():
-    Manifest.build_manifest('hostname', 'username', None)
+def test_manifest_from_filesystem_no_path():
+    Manifest.from_filesystem('hostname', 'username', None)
 
 
 @raises(ValueError)
 @with_setup(setup_func, teardown_func)
-def test_manifest_build_manifest_path_is_not_directory():
+def test_manifest_from_filesystem_path_is_not_directory():
     path = os.path.join(temp_dir, '0')
-    Manifest.build_manifest('hostname', 'username', path)
+    Manifest.from_filesystem('hostname', 'username', path)
 
 
 @with_setup(setup_func, teardown_func)
-def test_manifest_build_manifest():
+def test_manifest_from_filesystem():
     expected_tree = Tree(DirectoryEntry.for_directory(temp_dir), [])
     expected_name = 'manifest/hostname/username/2013-03-18T15:33:50.122018'
     expected = Manifest(expected_name, expected_tree)
@@ -193,7 +195,7 @@ def test_manifest_build_manifest():
     with patch("tardis.manifest.iso8601") as iso8601:
         iso8601.return_value = '2013-03-18T15:33:50.122018'
 
-        assert_really_equal(expected, Manifest.build_manifest('hostname', 'username', temp_dir))
+        assert_really_equal(expected, Manifest.from_filesystem('hostname', 'username', temp_dir))
 
 
 @with_setup(setup_func, teardown_func)
@@ -207,7 +209,7 @@ def test_manifest_to_csv():
 
         return "{}:{}:{}".format(filename, object_id, ":".join(str(field) for field in stat_info))
 
-    manifest = Manifest.build_manifest('hostname', 'username', temp_dir)
+    manifest = Manifest.from_filesystem('hostname', 'username', temp_dir)
 
     with closing(StringIO()) as csvfile:
         manifest.to_csv(csvfile)
@@ -217,3 +219,97 @@ def test_manifest_to_csv():
     expected += [csv_row_for(i) for i in range(10)]
 
     assert_equals(sorted(expected), sorted(contents.splitlines()))
+
+
+@with_setup(setup_func, teardown_func)
+def test_manifest_from_cache():
+    def write_file(name, contents):
+        with open(name, 'w') as f:
+            f.write(contents)
+
+    temp_dir = tempfile.mkdtemp(suffix="tardis_test")
+    makedirs(os.path.join(temp_dir, 'foo', 'bar'))
+    makedirs(os.path.join(temp_dir, 'baz'))
+
+    path_join = functools.partial(os.path.join, temp_dir)
+
+# FIXME Shouldn't check in commented out code - this is necessary to build the
+# actual directory structure and files that are named by the .tardis_manifest
+# cached values below.
+#    # Set up the files and contents
+#    file_contents = { path_join('foo', 'file1'): "The Quick Brown Fox",
+#                      path_join('foo', 'file2'): "Jumps Over The Lazy Dog",
+#                      path_join('foo', 'bar', 'file3'): "How now",
+#                      path_join('foo', 'bar', 'file4'): "Brown cow",
+#                      path_join('foo', 'bar', 'file5'): "Hmmm...",
+#                      path_join('baz', 'file1'): "Hello world"
+#                    }
+#
+#    for name, contents in file_contents:
+#        write_file(name, contents)
+
+    # Set up the manifest caches
+    cache_name = '.tardis_manifest'
+
+    cache_contents = {
+            path_join(cache_name): "",
+            path_join('foo', cache_name): textwrap.dedent("""
+                                    {directory}/foo/file1:data/60b27f004e454aca81b0480209cce5081ec52390/ad9ea5b229df4b040d6df93cc2a5f3629dcf19b1:username:groupname:436:1363623087:1363623087:20
+                                    {directory}/foo/file2:data/cb99b709a1978bd205ab9dfd4c5aaa1fc91c7523/8958990b773b952af60ccca72b89ec494f3cf961:username:groupname:436:1363623102:1363623102:24
+                                    """).strip().format(directory=temp_dir),
+            path_join('foo', 'bar', cache_name): textwrap.dedent("""
+                                    {directory}/foo/bar/file3:data/d5b0a58bc47161b1b8a831084b366f757c4f0b11/6d4403f7e18e4446d5255f3e16fbc5f4c3dbadd7:username:groupname:436:1363623135:1363623135:8
+                                    {directory}/foo/bar/file4:data/1b641bf4f6b84efcd42920ff1a88ff2f97fb9d08/d1f308de70983ba84f040e1213f357135dd6862d:username:groupname:436:1363623143:1363623143:10
+                                    {directory}/foo/bar/file5:data/c1750bee9c1f7b5dd6f025b645ab6eba5df94175/a4b5fced08c0e9e4132fbe467320669a70cb9043:username:groupname:436:1363623150:1363623150:8
+                                    """).strip().format(directory=temp_dir),
+            path_join('baz', cache_name): textwrap.dedent("""
+                                    {directory}/baz/file1:data/60b27f004e454aca81b0480209cce5081ec52390/33ab5639bfd8e7b95eb1d8d0b87781d4ffea4d5d:username:groupname:436:1363623181:1363623181:12
+                                    """).strip().format(directory=temp_dir),
+        }
+
+    for name, contents in cache_contents.iteritems():
+        write_file(name, contents)
+
+    base_entry = DirectoryEntry(temp_dir, [])
+    foo_entry = DirectoryEntry(path_join('foo'), [ FileEntry( path_join('foo', 'file1')
+                                                            , "data/60b27f004e454aca81b0480209cce5081ec52390/ad9ea5b229df4b040d6df93cc2a5f3629dcf19b1"
+                                                            , StatInfo("username" , "groupname" , 436 , 1363623087 , 1363623087 , 20)
+                                                            )
+                                                 , FileEntry( path_join('foo', 'file2')
+                                                            , "data/cb99b709a1978bd205ab9dfd4c5aaa1fc91c7523/8958990b773b952af60ccca72b89ec494f3cf961"
+                                                            , StatInfo("username" , "groupname" , 436 , 1363623102 , 1363623102 , 24)
+                                                            )
+                                                 ])
+    foo_bar_entry = DirectoryEntry(path_join('foo', 'bar'), [ FileEntry( path_join('foo', 'bar', 'file3')
+                                                                       , "data/d5b0a58bc47161b1b8a831084b366f757c4f0b11/6d4403f7e18e4446d5255f3e16fbc5f4c3dbadd7"
+                                                                       , StatInfo("username" , "groupname" , 436 , 1363623135 , 1363623135 , 8)
+                                                                       )
+                                                            , FileEntry( path_join('foo', 'bar', 'file4')
+                                                                       , "data/1b641bf4f6b84efcd42920ff1a88ff2f97fb9d08/d1f308de70983ba84f040e1213f357135dd6862d"
+                                                                       , StatInfo("username" , "groupname" , 436 , 1363623143 , 1363623143 , 10)
+                                                                       )
+                                                            , FileEntry( path_join('foo', 'bar', 'file5')
+                                                                       , "data/c1750bee9c1f7b5dd6f025b645ab6eba5df94175/a4b5fced08c0e9e4132fbe467320669a70cb9043"
+                                                                       , StatInfo("username" , "groupname" , 436 , 1363623150 , 1363623150 , 8)
+                                                                       )
+                                                            ])
+    baz_entry = DirectoryEntry(path_join('baz'), [ FileEntry( path_join('baz', 'file1')
+                                                            , "data/60b27f004e454aca81b0480209cce5081ec52390/33ab5639bfd8e7b95eb1d8d0b87781d4ffea4d5d"
+                                                            , StatInfo("username" , "groupname" , 436 , 1363623181 , 1363623181 , 12)
+                                                            )
+                                                 ])
+
+    expected_tree = Tree(base_entry, [ Tree(foo_entry, [ Tree(foo_bar_entry)
+                                                       ])
+                                     , Tree(baz_entry)
+                                     ])
+
+    expected_name = 'manifest/hostname/username/2013-03-18T15:33:50.122018'
+    expected = Manifest(expected_name, expected_tree)
+
+    with patch("tardis.manifest.iso8601") as iso8601:
+        iso8601.return_value = '2013-03-18T15:33:50.122018'
+
+        manifest = Manifest.from_cache('hostname', 'username', temp_dir)
+
+        assert_really_equal(expected, manifest)

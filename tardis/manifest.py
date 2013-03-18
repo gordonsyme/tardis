@@ -4,6 +4,7 @@ import pwd, grp, stat
 
 import logging
 import csv
+import itertools
 import functools
 from collections import namedtuple
 
@@ -131,15 +132,27 @@ class DirectoryEntry(object):
         # I don't like this being here, feels impure and out-of-place
         with open(os.path.join(self.path, '.tardis_manifest'), 'w') as f:
             writer = csv.writer(f, delimiter=':', lineterminator='\n')
-            writer.writerows(entry.as_fields(self.path) for entry in self.entries)
+            writer.writerows(entry.as_fields() for entry in self.entries)
 
     @classmethod
-    def for_directory(cls, path, ignored_directories=None):
+    def from_cache(cls, path):
+        """Read this directory entry from an on-disk cache"""
+        # I don't like this being here, feels impure and out-of-place
+        def to_entry(row):
+            stat_info = StatInfo(row[2], row[3], int(row[4]), int(row[5]), int(row[6]), long(row[7]))
+            return FileEntry(row[0], row[1], stat_info)
+
+        with open(os.path.join(path, '.tardis_manifest')) as f:
+            reader = csv.reader(f, delimiter=':', lineterminator='\n')
+            entries = [to_entry(row) for row in reader]
+
+        return cls(path, entries)
+
+
+    @classmethod
+    def for_directory(cls, path):
         if not os.path.isdir(path):
             raise ValueError("{} does not name a directory".format(path))
-
-        if not ignored_directories:
-            ignored_directories = []
 
         path = os.path.abspath(path)
 
@@ -195,8 +208,38 @@ class Manifest(object):
         self._name = name
         self._manifest_tree = manifest_tree
 
+    def __iter__(self):
+        return itertools.chain(self._manifest_tree)
+
+    def __eq__(self, other):
+        if isinstance(other, Manifest):
+            return self.__dict__ == other.__dict__
+        return NotImplemented
+
+    def __ne__(self, other):
+        result = self.__eq__(other)
+        if result is NotImplemented:
+            return result
+        return not result
+
+    def to_csv(self, stream):
+        # Write the name of *this* manifest, but not the sub-manifests
+        # Each entry needs to know the path in order to properly write filenames
+        logging.debug("Writing {} to csv, entries: {}".format(self.__class__, self._manifest_tree))
+
+        writer = csv.writer(stream, delimiter=':', lineterminator='\n')
+        writer.writerow([self._name])
+        for directory_entry in self._manifest_tree:
+            writer.writerows(entry.as_fields() for entry in directory_entry)
+
     @classmethod
-    def build_manifest(cls, hostname, user, path, ignored_directories=None):
+    def from_filesystem(cls, hostname, user, path, ignored_directories=None):
+        to_directory_entry = functools.partial(DirectoryEntry.for_directory)
+
+        return cls._build_manifest(hostname, user, path, to_directory_entry, ignored_directories)
+
+    @classmethod
+    def _build_manifest(cls, hostname, user, path, f, ignored_directories=None):
         if not hostname:
             raise ValueError("hostname must be a non-empty string")
 
@@ -206,18 +249,23 @@ class Manifest(object):
         if not path:
             raise ValueError("path must be a non-empty string")
 
+        if not f:
+            raise ValueError("transform function must be specified")
+
         path = os.path.abspath(path)
         if not os.path.isdir(path):
             raise ValueError("{} does not name a directory".format(path))
 
+        if not ignored_directories:
+            ignored_directories = []
+
         def child_directories(dirname):
             names = [os.path.join(dirname, name) for name in os.listdir(dirname) if not name.startswith(".")]
-            return [name for name in names if os.path.isdir(name)]
+            return [name for name in names if os.path.isdir(name) and not name in ignored_directories]
 
         directory_tree = Tree.build_tree(path, child_directories)
 
-        to_manifest = functools.partial(DirectoryEntry.for_directory, ignored_directories=ignored_directories)
-        manifest_tree = directory_tree.fmap(to_manifest)
+        manifest_tree = directory_tree.fmap(f)
 
         return Manifest(cls.name_for(hostname, user), manifest_tree)
 
@@ -237,31 +285,10 @@ class Manifest(object):
     # create a manifest for each sub-directory (either by reading .tardis_manifest or creating from scratch)
     def write_cache(self):
         for directory_entry in self._manifest_tree:
-            directory_entry.write_cache
-
+            directory_entry.write_cache()
 
     @classmethod
-    def from_cache(cls, hostname, user, path):
-        raise NotImplementedError("Not implemented yet")
+    def from_cache(cls, hostname, user, path, ignored_directories=None):
+        directory_entry_from_cache = DirectoryEntry.from_cache
 
-
-    def to_csv(self, stream):
-        # Write the name of *this* manifest, but not the sub-manifests
-        # Each entry needs to know the path in order to properly write filenames
-        logging.debug("Writing {} to csv, entries: {}".format(self.__class__, self._manifest_tree))
-
-        writer = csv.writer(stream, delimiter=':', lineterminator='\n')
-        writer.writerow([self._name])
-        for directory_entry in self._manifest_tree:
-            writer.writerows(entry.as_fields() for entry in directory_entry)
-
-    def __eq__(self, other):
-        if isinstance(other, Manifest):
-            return self.__dict__ == other.__dict__
-        return NotImplemented
-
-    def __ne__(self, other):
-        result = self.__eq__(other)
-        if result is NotImplemented:
-            return result
-        return not result
+        return cls._build_manifest(hostname, user, path, directory_entry_from_cache, ignored_directories)
