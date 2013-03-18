@@ -13,6 +13,16 @@ from tardis.util import sha1sum
 from tardis.tree import Tree
 from tardis.manifest import StatInfo, FileEntry, DirectoryEntry, Manifest
 
+
+
+##################
+# StatInfo Tests #
+##################
+@raises(ValueError)
+def test_stat_info_no_path():
+    StatInfo.for_file(None)
+
+
 ###################
 # FileEntry Tests #
 ###################
