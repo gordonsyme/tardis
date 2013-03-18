@@ -16,7 +16,7 @@ def assert_really_equal(a, b):
 
 def assert_really_not_equal(a, b):
     # assert_not_equal first, because it will have a good message if the
-    # assert_ion fails.
+    # assertion fails.
     assert_not_equal(a, b)
     assert_not_equal(b, a)
     assert_false(a == b)
