@@ -10,6 +10,7 @@ from mock import patch
 from utilities import assert_really_equal, assert_really_not_equal
 
 from tardis.util import sha1sum
+from tardis.tree import Tree
 from tardis.manifest import StatInfo, FileEntry, DirectoryEntry, Manifest
 
 ###################
@@ -143,13 +144,48 @@ def test_directory_entry_for_directory():
     expected_entries = [expected_file_entry_for(i) for i in range(10)]
     expected = DirectoryEntry(temp_dir, expected_entries)
 
-    assert_equals(expected, DirectoryEntry.for_directory(temp_dir))
-
+    assert_really_equal(expected, DirectoryEntry.for_directory(temp_dir))
 
 
 ##################
 # Manifest Tests #
 ##################
+@raises(ValueError)
+@with_setup(setup_func, teardown_func)
+def test_manifest_build_manifest_no_hostname():
+    Manifest.build_manifest(None, 'username', temp_dir)
+
+
+@raises(ValueError)
+@with_setup(setup_func, teardown_func)
+def test_manifest_build_manifest_no_username():
+    Manifest.build_manifest('hostname', None, temp_dir)
+
+
+@raises(ValueError)
+def test_manifest_build_manifest_no_path():
+    Manifest.build_manifest('hostname', 'username', None)
+
+
+@raises(ValueError)
+@with_setup(setup_func, teardown_func)
+def test_manifest_build_manifest_path_is_not_directory():
+    path = os.path.join(temp_dir, '0')
+    Manifest.build_manifest('hostname', 'username', path)
+
+
+@with_setup(setup_func, teardown_func)
+def test_manifest_build_manifest():
+    expected_tree = Tree(DirectoryEntry.for_directory(temp_dir), [])
+    expected_name = 'manifest/hostname/username/2013-03-18T15:33:50.122018'
+    expected = Manifest(expected_name, expected_tree)
+
+    with patch("tardis.manifest.iso8601") as iso8601:
+        iso8601.return_value = '2013-03-18T15:33:50.122018'
+
+        assert_really_equal(expected, Manifest.build_manifest('hostname', 'username', temp_dir))
+
+
 @with_setup(setup_func, teardown_func)
 def test_manifest_to_csv():
     def csv_row_for(i):

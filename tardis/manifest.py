@@ -203,6 +203,9 @@ class Manifest(object):
         if not user:
             raise ValueError("user must be a non-empty string")
 
+        if not path:
+            raise ValueError("path must be a non-empty string")
+
         path = os.path.abspath(path)
         if not os.path.isdir(path):
             raise ValueError("{} does not name a directory".format(path))
@@ -250,4 +253,15 @@ class Manifest(object):
         writer = csv.writer(stream, delimiter=':', lineterminator='\n')
         writer.writerow([self._name])
         for directory_entry in self._manifest_tree:
-            writer.writerows(entry.as_fields() for entry in directory_entry.entries)
+            writer.writerows(entry.as_fields() for entry in directory_entry)
+
+    def __eq__(self, other):
+        if isinstance(other, Manifest):
+            return self.__dict__ == other.__dict__
+        return NotImplemented
+
+    def __ne__(self, other):
+        result = self.__eq__(other)
+        if result is NotImplemented:
+            return result
+        return not result
