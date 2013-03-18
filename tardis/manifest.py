@@ -96,15 +96,6 @@ class FileEntry(object):
         return not result
 
 
-class NullFileEntry(object):
-    """A FileEntry that is always different to every other"""
-    def __init__(self):
-        self.checksum = ""
-
-    def checksum_differs(self, other):
-        return True
-
-
 class DirectoryEntry(object):
     """
     """

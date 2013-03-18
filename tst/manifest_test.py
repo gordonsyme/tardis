@@ -66,7 +66,21 @@ def test_file_entry_no_stat_info():
     stat_info = StatInfo.for_file(file_path)
     expected = FileEntry(file_path, "12345", stat_info)
 
-    assert_equals(expected, FileEntry(file_path, "12345"))
+    assert_really_equal(expected, FileEntry(file_path, "12345"))
+
+
+@with_setup(setup_func, teardown_func)
+def test_file_entry_checksum():
+    a = FileEntry(os.path.join(temp_dir, '0'), "data/54231/12345")
+    assert_equals("12345", a.checksum)
+
+
+@with_setup(setup_func, teardown_func)
+def test_file_entry_checksum():
+    a = FileEntry(os.path.join(temp_dir, '0'), "data/54231/12345")
+    b = FileEntry(os.path.join(temp_dir, '0'), "data/54231/67890")
+    assert_true(a.checksum_differs(b))
+    assert_true(b.checksum_differs(a))
 
 
 @with_setup(setup_func, teardown_func)
@@ -88,7 +102,7 @@ def test_file_entry_as_fields():
     stat_info = StatInfo.for_file(filename)
     expected = (filename, "data/{}/{}".format(sha1sum('0'), sha1sum("This is content number 0"))) + stat_info
 
-    assert_equals(expected, entry.as_fields())
+    assert_really_equal(expected, entry.as_fields())
 
 
 @with_setup(setup_func, teardown_func)
