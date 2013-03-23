@@ -60,7 +60,7 @@ def restore_archive(path, archive):
 
 
 def put_manifest(bucket, manifest):
-    logging.debug("Putting manifest {}".format(manifest.name))
+    logging.debug("Putting manifest {}".format(manifest._name))
 
     with tempfile.NamedTemporaryFile(prefix="tmpmanifest", delete=False) as csvfile:
         manifest.to_csv(csvfile)
@@ -68,7 +68,7 @@ def put_manifest(bucket, manifest):
 
     try:
         with closing(Key(bucket)) as key:
-            key.key = manifest.name
+            key.key = manifest._name
             key.set_contents_from_filename(manifest_filename, encrypt_key=True)
     finally:
         os.unlink(manifest_filename)
@@ -83,14 +83,14 @@ def latest_manifest(bucket, hostname, user):
     keys = list_manifest_keys(bucket, hostname, user)
 
     if not keys:
-        return Manifest({})
+        return Manifest("", {})
 
     most_recent_key = reversed(sorted(keys, key=lambda k: k.name)).next()
 
     with closing(StringIO(most_recent_key.get_contents_as_string())) as csvfile:
-        manifest = Manifest.from_csv(csvfile, most_recent_key.name)
+        manifest = Manifest.from_csv(csvfile)
 
-    logging.debug("Latest manifest - {}".format(manifest.name))
+    logging.debug("Latest manifest - {}".format(manifest._name))
 
     return manifest
 
@@ -132,9 +132,9 @@ def restore(restore_roots, get_archive, restore_archive, get_manifest):
 
     for directory in restore_roots:
         path = os.path.abspath(directory)
-        makedirs(path)
 
         logging.debug("Attempting to restore {}".format(path))
+        makedirs(path)
 
         paths = (f for f in manifest if f.startswith(path))
 

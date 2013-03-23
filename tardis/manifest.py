@@ -6,7 +6,7 @@ import logging
 import csv
 import itertools
 import functools
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 
 from tardis.util import sha1sum, iso8601
 from tardis.tree import Tree
@@ -80,7 +80,8 @@ class FileEntry(object):
     @classmethod
     def from_fields(cls, fields):
         logging.debug("Creating FileEntry from: {}".format(fields))
-        return cls(*fields)
+        stat_info = StatInfo(fields[2], fields[3], int(fields[4]), int(fields[5]), int(fields[6]), long(fields[7]))
+        return cls(fields[0], fields[1], stat_info)
 
     def as_fields(self):
         return (self.path, self.object_id) + self.stat_info
@@ -97,18 +98,20 @@ class FileEntry(object):
         return not result
 
 
+class NullFileEntry(object):
+    def checksum_differs(self, other):
+        return True
+
+    def checksum(self):
+        return "no checksum"
+
+
 class DirectoryEntry(object):
     """
     """
     def __init__(self, path, entries=None):
         self.path = path
         self.entries = entries
-
-    def __getitem__(self, item):
-        return self.entries.__getitem__(item)
-
-    def __contains__(self, item):
-        return self.entries.__contains__(item)
 
     def __iter__(self):
         return self.entries.__iter__()
@@ -137,17 +140,11 @@ class DirectoryEntry(object):
     @classmethod
     def from_cache(cls, path):
         """Read this directory entry from an on-disk cache"""
-        # I don't like this being here, feels impure and out-of-place
-        def to_entry(row):
-            stat_info = StatInfo(row[2], row[3], int(row[4]), int(row[5]), int(row[6]), long(row[7]))
-            return FileEntry(row[0], row[1], stat_info)
-
         with open(os.path.join(path, '.tardis_manifest')) as f:
             reader = csv.reader(f, delimiter=':', lineterminator='\n')
-            entries = [to_entry(row) for row in reader]
+            entries = [FileEntry.from_fields(row) for row in reader]
 
         return cls(path, entries)
-
 
     @classmethod
     def for_directory(cls, path):
@@ -191,25 +188,24 @@ class DirectoryEntry(object):
 class Manifest(object):
     """A backup manifest.
 
-    <
-    Recursive structure:
-        - current directory
-        - ManifestEntries for each regular file
-        - Manifests for each subdirectory
-    >
-
     Maps file paths to the FileEntry for that file.
 
     Manifest keys are named in the following format:
 
     manifest/{hostname}/{user}/{timestamp}
     """
-    def __init__(self, name, manifest_tree):
+    def __init__(self, name, manifest):
         self._name = name
-        self._manifest_tree = manifest_tree
+        self._manifest = dict(manifest)
 
     def __iter__(self):
-        return itertools.chain(self._manifest_tree)
+        return iter(self._manifest)
+
+    def __getitem__(self, item):
+        return self._manifest.get(item, NullFileEntry())
+
+    def __contains__(self, item):
+        return self._manifest.__contains__(item)
 
     def __eq__(self, other):
         if isinstance(other, Manifest):
@@ -223,14 +219,26 @@ class Manifest(object):
         return not result
 
     def to_csv(self, stream):
-        # Write the name of *this* manifest, but not the sub-manifests
-        # Each entry needs to know the path in order to properly write filenames
-        logging.debug("Writing {} to csv, entries: {}".format(self.__class__, self._manifest_tree))
+        logging.debug("Writing {} to csv, entries: {}".format(self.__class__, self._manifest))
 
         writer = csv.writer(stream, delimiter=':', lineterminator='\n')
         writer.writerow([self._name])
-        for directory_entry in self._manifest_tree:
-            writer.writerows(entry.as_fields() for entry in directory_entry)
+        for path in self._manifest:
+            entry = self._manifest[path]
+            writer.writerow(entry.as_fields())
+
+    @classmethod
+    def from_csv(cls, stream):
+        reader = csv.reader(stream, delimiter=':', lineterminator='\n')
+        manifest_name = next(reader)[0]
+
+        file_entries = dict()
+        for row in reader:
+            entry = FileEntry.from_fields(row)
+            file_entries[entry.path] = entry
+
+        return cls(manifest_name, file_entries)
+
 
     @classmethod
     def from_filesystem(cls, hostname, user, path, ignored_directories=None):
@@ -264,10 +272,11 @@ class Manifest(object):
             return [name for name in names if os.path.isdir(name) and not name in ignored_directories]
 
         directory_tree = Tree.build_tree(path, child_directories)
-
         manifest_tree = directory_tree.fmap(f)
 
-        return Manifest(cls.name_for(hostname, user), manifest_tree)
+        file_entries = { entry.path: entry for entry in itertools.chain.from_iterable(manifest_tree) }
+
+        return Manifest(cls.name_for(hostname, user), file_entries)
 
     @classmethod
     def name_prefix_for(cls, hostname, user):
