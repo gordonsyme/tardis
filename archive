@@ -15,7 +15,7 @@ from tardis.util import iso8601
 from tardis.manifest import Manifest
 from tardis import needs_put, put_archive, get_archive, create_archive, restore_archive
 from tardis import put_manifest, latest_manifest
-from tardis import backup, restore
+from tardis import backup, restore, create_caches
 
 
 logging.basicConfig(level=logging.DEBUG,
@@ -57,6 +57,11 @@ def build_arg_parser():
     restore_parser = subparsers.add_parser('restore', help='restore directories')
     restore_parser.add_argument('paths', metavar='PATH',
                                 nargs='+', help='directories to restore')
+
+    cache_parser = subparsers.add_parser('cache', help='compute and cache backup metadata')
+    cache_parser.add_argument('paths', metavar='PATH',
+                              type=existing_directory, nargs='+',
+                              help='directories to process')
     return parser
 
 
@@ -90,6 +95,12 @@ def main():
                 restore_archive,
                 functools.partial(latest_manifest, bucket, hostname, username),
                )
+
+    if args.command == 'cache':
+        create_caches(args.paths,
+                      [],
+                      functools.partial(Manifest.from_filesystem, hostname, username)
+                     )
 
 
 if __name__ == '__main__':

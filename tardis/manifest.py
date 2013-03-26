@@ -15,6 +15,18 @@ from tardis.tree import Tree
 class StatInfo(namedtuple('StatInfo', [ 'owner' , 'group' , 'mode' , 'ctime' , 'mtime' , 'size' ])):
     __slots__ = () # avoid creating an instance __dict__
 
+    def apply_to(self, path):
+        if not path or not os.path.isfile(path):
+            raise ValueError("Must specify a file path")
+
+        uid = pwd.getpwdnam(self.owner).pw_uid
+        gid = grp.getgrnam(self.group).gr_gid
+        os.chown(path, uid, gid)
+
+        os.chmod(path, self.mode)
+
+        os.utime(path, (self.mtime, self.mtime))
+
     @classmethod
     def for_file(cls, path):
         if not path:
@@ -99,6 +111,9 @@ class FileEntry(object):
 
 
 class NullFileEntry(object):
+    def __init__(self):
+        self.stat_info = tuple()
+
     def checksum_differs(self, other):
         return True
 
@@ -109,6 +124,8 @@ class NullFileEntry(object):
 class DirectoryEntry(object):
     """
     """
+    _CACHE_IGNORE_LIMIT = 2**16
+
     def __init__(self, path, entries=None):
         self.path = path
         self.entries = entries
@@ -151,17 +168,37 @@ class DirectoryEntry(object):
         if not os.path.isdir(path):
             raise ValueError("{} does not name a directory".format(path))
 
+        def create_cache(cache_path):
+            try:
+                with open(os.path.join(cache_path, '.tardis_manifest')) as f:
+                    reader = csv.reader(f, delimiter=':', lineterminator='\n')
+                    entries = (FileEntry.from_fields(row) for row in reader)
+
+                    return { entry.path: entry for entry in entries }
+            except:
+                logging.debug("Unable to create cache", exc_info=True)
+                return {}
+
+        def get_file_entry(cache, file_path):
+            stat_info = StatInfo.for_file(file_path)
+
+            if stat_info.size > cls._CACHE_IGNORE_LIMIT:
+                cached_entry = cache.get(file_path, NullFileEntry())
+                if cached_entry.stat_info == stat_info:
+                    logging.debug("Using cached data for {}".format(file_path))
+                    return cached_entry
+            return FileEntry(file_path, cls._object_id(file_path), stat_info)
+
         path = os.path.abspath(path)
 
-        logging.debug("Creating manifest for {}".format(path))
+        logging.debug("Creating directory entry for {}".format(path))
 
-        paths = [os.path.join(path, e) for e in sorted(os.listdir(path))]
+        make_entry = functools.partial(get_file_entry, create_cache(path))
 
-        entries = [FileEntry(f, cls._object_id(f), StatInfo.for_file(f))
-                       for f in paths
-                       if os.path.isfile(f)]
+        paths = [os.path.join(path, e) for e in sorted(os.listdir(path)) if e != '.tardis_manifest']
+        entries = [make_entry(f) for f in paths if os.path.isfile(f)]
 
-        return DirectoryEntry(path, entries)
+        return cls(path, entries)
 
     @classmethod
     def _object_id(cls, path):
@@ -239,21 +276,30 @@ class Manifest(object):
 
         return cls(manifest_name, file_entries)
 
-
     @classmethod
-    def from_filesystem(cls, hostname, user, path, ignored_directories=None):
-        to_directory_entry = functools.partial(DirectoryEntry.for_directory)
-
-        return cls._build_manifest(hostname, user, path, to_directory_entry, ignored_directories)
-
-    @classmethod
-    def _build_manifest(cls, hostname, user, path, f, ignored_directories=None):
+    def from_filesystem(cls, hostname, user, paths, ignored_directories=None):
         if not hostname:
             raise ValueError("hostname must be a non-empty string")
 
         if not user:
             raise ValueError("user must be a non-empty string")
 
+        if not paths:
+            raise ValueError("paths must be an iterable of paths to back up")
+
+        def to_directory_entry(directory_path):
+            entry = DirectoryEntry.for_directory(directory_path)
+            entry.write_cache()
+            return entry
+
+        file_entries = {}
+        for path in paths:
+            file_entries.update(cls._build_manifest(path, to_directory_entry, ignored_directories))
+
+        return cls(cls.name_for(hostname, user), file_entries)
+
+    @classmethod
+    def _build_manifest(cls, path, f, ignored_directories=None):
         if not path:
             raise ValueError("path must be a non-empty string")
 
@@ -274,9 +320,7 @@ class Manifest(object):
         directory_tree = Tree.build_tree(path, child_directories)
         manifest_tree = directory_tree.fmap(f)
 
-        file_entries = { entry.path: entry for entry in itertools.chain.from_iterable(manifest_tree) }
-
-        return Manifest(cls.name_for(hostname, user), file_entries)
+        return { entry.path: entry for entry in itertools.chain.from_iterable(manifest_tree) }
 
     @classmethod
     def name_prefix_for(cls, hostname, user):
@@ -285,19 +329,3 @@ class Manifest(object):
     @classmethod
     def name_for(cls, hostname, user):
         return cls.name_prefix_for(hostname, user) + iso8601()
-
-    # In each directory write:
-    # .tardis_manifest which contains just the *entries* for that directory
-    #
-    # To re-create a manifest:
-    # read .tardis_manifest -> gets the manifest entries
-    # create a manifest for each sub-directory (either by reading .tardis_manifest or creating from scratch)
-    def write_cache(self):
-        for directory_entry in self._manifest_tree:
-            directory_entry.write_cache()
-
-    @classmethod
-    def from_cache(cls, hostname, user, path, ignored_directories=None):
-        directory_entry_from_cache = DirectoryEntry.from_cache
-
-        return cls._build_manifest(hostname, user, path, directory_entry_from_cache, ignored_directories)

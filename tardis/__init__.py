@@ -49,7 +49,8 @@ def create_archive(path):
     return gzip_file.name
 
 
-def restore_archive(path, archive):
+def restore_archive(entry, archive):
+    path = entry.file_path
     logging.debug("Restoring from gzip {}".format(path))
 
     makedirs(os.path.dirname(path))
@@ -57,6 +58,12 @@ def restore_archive(path, archive):
     with gzip.open(archive, 'rb') as gzip_file:
         with open(path, 'wb') as output_file:
             output_file.writelines(gzip_file)
+
+    # FIXME violates Law of Demeter
+    try:
+        entry.stat_info.apply_to(path)
+    except OSError as e:
+        logging.warn("Unable to set filesystem metadata on {}: {}".format(path, e), exc_info=True)
 
 
 def put_manifest(bucket, manifest):
@@ -142,4 +149,8 @@ def restore(restore_roots, get_archive, restore_archive, get_manifest):
             logging.debug("Found {} in manifest".format(file_path))
             entry = manifest[file_path]
             logging.debug("Manifest entry is {}".format(entry))
-            restore_archive(file_path, get_archive(entry))
+            restore_archive(entry, get_archive(entry))
+
+
+def create_caches(roots, skip_directories, create_manifest):
+    manifest = create_manifest(roots, skip_directories)
