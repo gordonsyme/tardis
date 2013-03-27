@@ -9,6 +9,8 @@ import logging
 
 import argparse
 
+from contextlib import closing
+
 from boto.s3.connection import S3Connection, Location
 
 from tardis.util import iso8601
@@ -76,16 +78,24 @@ def main():
         reader = csv.DictReader(csvfile)
         aws_info = reader.next()
 
-    connection = S3Connection(aws_info['Access Key Id'], aws_info['Secret Access Key'])
-    bucket = connection.get_bucket(aws_info['Bucket'])
+    def get_bucket():
+        def gen():
+            while True:
+                with closing(S3Connection(aws_info['Access Key Id'], aws_info['Secret Access Key'])) as connection:
+                    bucket = connection.get_bucket(aws_info['Bucket'])
+                    logging.debug("Got bucket reference {}".format(bucket))
+                    for i in xrange(100):   # this should really be timed
+                        yield bucket
+        g = gen()
+        return lambda: next(g)
 
     if args.command == 'backup':
         backup(args.paths,
                [],
-               functools.partial(put_archive, bucket, create_archive),
-               functools.partial(needs_put, bucket),
-               functools.partial(put_manifest, bucket),
-               functools.partial(latest_manifest, bucket, hostname, username),
+               functools.partial(put_archive, get_bucket(), create_archive),
+               functools.partial(needs_put, get_bucket()),
+               functools.partial(put_manifest, get_bucket()),
+               functools.partial(latest_manifest, get_bucket(), hostname, username),
                functools.partial(Manifest.from_filesystem, hostname, username)
               )
 

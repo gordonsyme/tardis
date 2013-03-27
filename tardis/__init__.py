@@ -27,14 +27,14 @@ def put_archive(bucket, create_archive, manifest_entry):
 
     logging.debug("created archive {} for {}".format(archive_path, manifest_entry))
 
-    with closing(key_from(bucket, manifest_entry)) as key:
+    with closing(key_from(bucket(), manifest_entry)) as key:
         key.set_contents_from_filename(archive_path, encrypt_key=True)
 
     logging.debug("{} put successfully".format(manifest_entry))
 
 
 def get_archive(bucket, manifest_entry):
-    key = key_from(bucket, manifest_entry)
+    key = key_from(bucket(), manifest_entry)
     key.get_contents_to_filename(__temp_archive_name)   # eww
     return __temp_archive_name                          # eww
 
@@ -74,7 +74,7 @@ def put_manifest(bucket, manifest):
         manifest_filename = csvfile.name
 
     try:
-        with closing(Key(bucket)) as key:
+        with closing(Key(bucket())) as key:
             key.key = manifest._name
             key.set_contents_from_filename(manifest_filename, encrypt_key=True)
     finally:
@@ -83,7 +83,7 @@ def put_manifest(bucket, manifest):
 
 def list_manifest_keys(bucket, hostname, user):
     key_prefix = Manifest.name_prefix_for(hostname, user)
-    return [key for key in bucket.list(prefix=key_prefix) if not key.name == key_prefix]
+    return [key for key in bucket().list(prefix=key_prefix) if not key.name == key_prefix]
 
 
 def latest_manifest(bucket, hostname, user):
@@ -106,7 +106,7 @@ def needs_put(bucket, entry, new_entry):
     if entry.checksum_differs(new_entry) or new_entry.checksum_differs(entry): # eww
         logging.debug("Checksums differ")
 
-        if not bucket.get_key(entry.object_id):
+        if not bucket().get_key(entry.object_id):
             logging.debug("Content not already archived")
             return True
 

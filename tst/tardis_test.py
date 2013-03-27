@@ -17,7 +17,7 @@ manifest_names = [ MockManifestKey("manifest/hostname/username/")
 
 def test_list_manifest_keys():
     bucket = Mock()
-    bucket.list.return_value = manifest_names
+    bucket().list.return_value = manifest_names
 
     expected = [ MockManifestKey("manifest/hostname/username/2012-11-25T12:01:00.000000")
                , MockManifestKey("manifest/hostname/username/2012-11-25T12:05:00.000000")
