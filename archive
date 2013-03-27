@@ -84,7 +84,9 @@ def main():
                 with closing(S3Connection(aws_info['Access Key Id'], aws_info['Secret Access Key'])) as connection:
                     bucket = connection.get_bucket(aws_info['Bucket'])
                     logging.debug("Got bucket reference {}".format(bucket))
-                    for i in xrange(100):   # this should really be timed
+                    # See http://aws.amazon.com/articles/1904,S3 will close a
+                    # connection once it's been used for 100 requests
+                    for i in xrange(40):
                         yield bucket
         g = gen()
         return lambda: next(g)
