@@ -118,10 +118,8 @@ def backup(backup_roots, skip_directories, put_archive, needs_put, put_manifest,
 
     new_manifest = create_manifest(backup_roots, skip_directories)
 
-    if new_manifest == latest_manifest:
-        logging.debug("No content changed, nothing to backup")
-        return
-
+    # new_manifest can be a lazy data-structure, manifest_entry can be computed
+    # on-the-fly.
     for path in new_manifest:
         manifest_entry = new_manifest[path]
 
@@ -135,6 +133,10 @@ def backup(backup_roots, skip_directories, put_archive, needs_put, put_manifest,
 
 
 def restore(restore_roots, get_archive, restore_archive, get_manifest):
+    # Here's where it gets a bit tricksy, get_manifest needs to be able to
+    # create a Manifest instance from the CSV stored in S3.
+    # At first glance this doesn't play well with the lazy data-structure used
+    # by 'backup'.
     manifest = get_manifest()
 
     for directory in restore_roots:

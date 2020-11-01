@@ -175,7 +175,7 @@ class DirectoryEntry(object):
                     entries = (FileEntry.from_fields(row) for row in reader)
 
                     return { entry.path: entry for entry in entries }
-            except:
+            except (OSError, IOError):
                 logging.debug("Unable to create cache", exc_info=True)
                 return {}
 

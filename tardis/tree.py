@@ -2,6 +2,7 @@ from itertools import chain
 
 
 class Tree(object):
+    """A rose-tree, nodes can have arbitrary numbers of children."""
     def __init__(self, value, children=None):
         if not children:
             children = []
